@@ -4,9 +4,16 @@
 // =============================================================================
 
 var mongoose   = require('mongoose');
+var passport = require('passport');
 mongoose.connect('mongodb://' + process.env.MONGOLAB_USERNAME + ':' + process.env.MONGOLAB_PASSWORD + '@ds031883.mongolab.com:31883/mean-ionic')
 var Post     = require('./app/models/post');
-var Comment  = require('./app/models/comment')
+var Comment  = require('./app/models/comment');
+var User     = require('./app/models/user');
+var passportConfig = require('./app/config/passport');
+var jwt = require('express-jwt');
+var auth = jwt({ secret: process.env.JWT_SECRET, userPropery: 'payload' });
+
+
 
 
 // call the packages we need
@@ -18,6 +25,8 @@ var bodyParser = require('body-parser');
 // this will let us get the data from a POST
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
+
+app.use(passport.initialize());
 
 var port = process.env.PORT || 8080;        // set our port
 
@@ -37,9 +46,9 @@ router.get('/', function(req, res) {
 
 router.route('/posts')
 
-    .post(function(req, res) {
-        var post = new Post();
-        post.author = req.body.author;
+    .post(auth, function(req, res) {
+        var post = new Post(req.body);
+        post.author = req.payload.author;
         post.location = req.body.location;
         post.message = req.body.message;
         post.likes = req.body.likes;
@@ -54,7 +63,7 @@ router.route('/posts')
         
     })
 
-    .get(function(req, res) {
+    .get(auth, function(req, res) {
 
         Post.find(function(err, posts) {
             if (err) {
@@ -66,7 +75,7 @@ router.route('/posts')
 
 
 router.route('/posts/:post_id')
-    .get(function(req, res) {
+    .get(auth, function(req, res) {
         Post.findById(req.params.post_id, function(err, post) {
             if (err) {
                 res.send(err)
@@ -75,7 +84,7 @@ router.route('/posts/:post_id')
         })
     })
 
-    .put(function(req, res) {
+    .put(auth, function(req, res) {
         Post.findById(req.params.post_id, function(err, post) {
             if (err) {
                 res.send(err);
@@ -94,7 +103,7 @@ router.route('/posts/:post_id')
         });
     })
 
-    .delete(function(req, res) {
+    .delete(auth, function(req, res) {
         Post.remove({ _id: req.params.post_id }, function(err, post) {
             if (err) {
                 res.send(err);
@@ -104,7 +113,7 @@ router.route('/posts/:post_id')
     });
 
 router.route('/posts/:post_id/like')
-    .put(function(req, res) {
+    .put(auth, function(req, res) {
         Post.findById(req.params.post_id, function(err, post) {
             if (err) {
                 res.send(err);
@@ -121,7 +130,7 @@ router.route('/posts/:post_id/like')
 
 router.route('/posts/:post_id/comments')
 
-    .put(function(req, res) {
+    .post(auth, function(req, res) {
         Post.findById(req.params.post_id, function(err, post) {
             if (err) {
                 res.send(err);
@@ -129,6 +138,8 @@ router.route('/posts/:post_id/comments')
 
             var comment = new Comment(req.body);
             comment.post = post;
+            comment.body = req.body.body;
+            comment.author = req.payload.author;
             comment.save(function(err, comment) {
                 if (err) {
                     res.send(err);
@@ -145,27 +156,37 @@ router.route('/posts/:post_id/comments')
     })
 
 
+router.post('/register', function(req, res, next) {
+    if (!req.body.username || !req.body.password) {
+        return res.status(400).json({ message: 'Please fill out all fields.' });
+    }
 
-    // .post(function(req, res) {
+    var user = new User(req.body);
+    user.username = req.body.username;
+    user.setPassword(req.body.password);
+    user.save(function(err) {
+        if (err) {
+            return next(err);
+        }
+        return res.json({ token: user.generateJWT() });
+    });
+})
 
-    //     var comment = new Comment(req.body);
-    //     comment.post =  req.post;
+router.post('/login', function(req, res, next){
+  if(!req.body.username || !req.body.password){
+    return res.status(400).json({message: 'Please fill out all fields'});
+  }
 
-    //     comment.save(function(err, comment) {
-    //         if (err) {
-    //             res.send(err);
-    //         }
+  passport.authenticate('local', function(err, user, info){
+    if(err){ return next(err); }
 
-    //         req.post.comments.push(comment)
-    //         req.post.save(function(err) {
-    //             if (err) {
-    //                 res.send(err);
-    //             }
-    //         })
-    //         res.json({ message: 'Comment created!' });
-    //     });
-        
-    // })
+    if(user){
+      return res.json({token: user.generateJWT()});
+    } else {
+      return res.status(401).json(info);
+    }
+  })(req, res, next);
+});
 
 // more routes for our API will happen here
 
